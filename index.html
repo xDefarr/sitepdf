@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>PDF Редактор</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/4.6.0/fabric.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    canvas { border: 1px solid #ccc; margin-top: 10px; display: block; }
+    .controls { margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+  <h2>PDF Редактор</h2>
+
+  <input type="file" id="pdfUpload" accept=".pdf" />
+  <div class="controls">
+    <button onclick="addText()">Добавить текст</button>
+    <button onclick="makeBold()">Жирный</button>
+    <button onclick="makeThin()">Обычный</button>
+    <button onclick="increaseFont()">Увеличить</button>
+    <button onclick="decreaseFont()">Уменьшить</button>
+    <button onclick="enableEraser()">Ластик</button>
+    <input type="file" id="imageUpload" accept="image/*" />
+    <button onclick="savePdf()">Сохранить PDF</button>
+  </div>
+
+  <canvas id="pdfCanvas" width="600" height="800"></canvas>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+    const fabricCanvas = new fabric.Canvas('pdfCanvas');
+    const canvasElement = document.getElementById('pdfCanvas');
+    const ctx = canvasElement.getContext('2d');
+    let isErasing = false;
+
+    document.getElementById('pdfUpload').addEventListener('change', async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = async function () {
+        const typedArray = new Uint8Array(this.result);
+        const pdf = await pdfjsLib.getDocument({ data: typedArray }).promise;
+
+        const page = await pdf.getPage(1);
+        const viewport = page.getViewport({ scale: 1.5 });
+
+        canvasElement.width = viewport.width;
+        canvasElement.height = viewport.height;
+        fabricCanvas.setWidth(viewport.width);
+        fabricCanvas.setHeight(viewport.height);
+
+        const renderContext = {
+          canvasContext: ctx,
+          viewport: viewport
+        };
+
+        await page.render(renderContext).promise;
+
+        const bgDataUrl = canvasElement.toDataURL('image/png');
+        fabric.Image.fromURL(bgDataUrl, function(img) {
+          fabricCanvas.setBackgroundImage(img, fabricCanvas.renderAll.bind(fabricCanvas), {
+            scaleX: 1,
+            scaleY: 1,
+            originX: 'left',
+            originY: 'top'
+          });
+        });
+      };
+
+      reader.readAsArrayBuffer(file);
+    });
+
+    function addText() {
+      const text = new fabric.IText('Введите текст', {
+        left: 100,
+        top: 100,
+        fontSize: 20,
+        fill: 'black'
+      });
+      fabricCanvas.add(text);
+    }
+
+    function makeBold() {
+      const obj = fabricCanvas.getActiveObject();
+      if (obj && obj.type === 'i-text') {
+        obj.set('fontWeight', 'bold');
+        fabricCanvas.renderAll();
+      }
+    }
+
+    function makeThin() {
+      const obj = fabricCanvas.getActiveObject();
+      if (obj && obj.type === 'i-text') {
+        obj.set('fontWeight', 'normal');
+        fabricCanvas.renderAll();
+      }
+    }
+
+    function increaseFont() {
+      const obj = fabricCanvas.getActiveObject();
+      if (obj && obj.type === 'i-text') {
+        obj.set('fontSize', obj.fontSize + 2);
+        fabricCanvas.renderAll();
+      }
+    }
+
+    function decreaseFont() {
+      const obj = fabricCanvas.getActiveObject();
+      if (obj && obj.type === 'i-text') {
+        obj.set('fontSize', Math.max(2, obj.fontSize - 2));
+        fabricCanvas.renderAll();
+      }
+    }
+
+    function enableEraser() {
+      isErasing = !isErasing;
+      fabricCanvas.isDrawingMode = isErasing;
+      fabricCanvas.freeDrawingBrush = new fabric.PencilBrush(fabricCanvas);
+      fabricCanvas.freeDrawingBrush.width = 20;
+      fabricCanvas.freeDrawingBrush.color = "#ffffff";
+    }
+
+    document.getElementById('imageUpload').addEventListener('change', function (event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        fabric.Image.fromURL(e.target.result, function (img) {
+          img.set({ left: 150, top: 150, scaleX: 0.3, scaleY: 0.3 });
+          fabricCanvas.add(img);
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+
+    async function savePdf() {
+      const editedImgData = fabricCanvas.toDataURL({ format: 'png' });
+      const pdfDoc = await PDFLib.PDFDocument.create();
+      const pngImageBytes = await fetch(editedImgData).then(res => res.arrayBuffer());
+      const pngImage = await pdfDoc.embedPng(pngImageBytes);
+
+      const page = pdfDoc.addPage([fabricCanvas.width, fabricCanvas.height]);
+      page.drawImage(pngImage, {
+        x: 0,
+        y: 0,
+        width: fabricCanvas.width,
+        height: fabricCanvas.height
+      });
+
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'edited.pdf';
+      link.click();
+    }
+  </script>
+</body>
+</html>
